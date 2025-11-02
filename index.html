@@ -1,0 +1,513 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no"/>
+<title>Mzplay Digits Predictor</title>
+<style>
+  :root {
+    --size: min(6vw, 28px);
+    --gap: min(1.5vw, 8px);
+    --font: "Segoe UI", Roboto, Arial, sans-serif;
+  }
+
+  html, body {
+    width: 100%;
+    height: 100%;
+    margin: 0;
+    padding: 0;
+    overflow: hidden; /* disable scroll */
+    background: #f6f7fb;
+    font-family: var(--font);
+    color: #111;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: flex-start;
+  }
+
+  h1 {
+    margin: 2vh 0 0.5vh;
+    font-size: min(5vw, 18px);
+  }
+  p.sub {
+    margin: 0 0 2vh;
+    color: #555;
+    font-size: min(3.5vw, 13px);
+    text-align: center;
+    padding: 0 4vw;
+  }
+
+  .wrap {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    align-items: flex-start;
+    gap: 2vw;
+    width: 95vw;
+    max-width: 1200px;
+    flex: 1;
+  }
+
+  .left, .right {
+    background: #fff;
+    border-radius: 10px;
+    box-shadow: 0 6px 18px rgba(10,10,20,0.06);
+    padding: 12px;
+  }
+
+  .left {
+    flex: 1 1 auto;
+    max-width: 70vw;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+  }
+
+  /* Chart */
+  .chart {
+    width: 100%;
+    height: 60vh;
+    overflow: hidden; /* no scroll, prevents SVG spilling out */
+    position: relative; /* svg is positioned inside this */
+    padding: 8px 14px;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    z-index: 1;
+  }
+
+  /* SVG lines are absolutely positioned and locked inside .chart.
+     z-index:0 ensures they sit behind digits */
+  svg.lines {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+    overflow: hidden; /* IMPORTANT: prevents lines escaping the chart */
+    z-index: 0;
+  }
+
+  .row {
+    display: grid;
+    grid-template-columns: repeat(10, var(--size));
+    gap: var(--gap);
+    justify-content: center;
+    margin: 0.5vh 0;
+    position: relative;
+    z-index: 2; /* rows & digits above svg */
+  }
+
+  .digit {
+    width: var(--size);
+    height: var(--size);
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 700;
+    color: #111;
+    cursor: pointer;
+    border: 1px solid #ddd;
+    background: #fff;
+    transition: background 0.3s ease, box-shadow 0.3s ease, color 0.3s ease;
+    user-select: none;
+    position: relative;
+    z-index: 3; /* ensures digits always render above the lines */
+  }
+
+  .digit.active.green { background:#6fcf97; box-shadow:0 0 10px 3px rgba(111,207,151,0.55); color:#fff; }
+  .digit.active.red { background:#eb5757; box-shadow:0 0 10px 3px rgba(235,87,87,0.55); color:#fff; }
+  .digit.active.gradient-redviolet {
+    background:linear-gradient(90deg,#eb5757 0%, #bb6bd9 100%);
+    box-shadow:0 0 10px 3px rgba(187,107,217,0.45);
+    color:#fff;
+  }
+  .digit.active.gradient-greenviolet {
+    background:linear-gradient(90deg,#6fcf97 0%, #bb6bd9 100%);
+    box-shadow:0 0 10px 3px rgba(111,207,151,0.45);
+    color:#fff;
+  }
+
+  .controls {
+    display: flex;
+    gap: 8px;
+    margin-top: 2vh;
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+
+  button {
+    padding: 7px 12px;
+    border-radius: 8px;
+    font-weight: 700;
+    border: none;
+    cursor: pointer;
+    transition: opacity 0.15s ease;
+    font-size: min(4vw, 14px);
+  }
+  button:hover { opacity: 0.85; }
+  button.primary { background: #2b8bf2; color: #fff; }
+  button.secondary { background: #f3f4f6; color: #222; border: 1px solid #e6e7eb; }
+
+  /* Right panel — KEEP minimal (we removed the big "label" layout) */
+  .right {
+    width: min(80vw, 220px);
+    min-height: 140px;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    justify-content: center;
+    position: relative;
+    z-index: 4; /* ensure right panel stays above chart if anything overlaps */
+  }
+
+  .muted { color:#666; font-size:min(3.5vw,13px); }
+  footer { margin-top:10px; font-size:min(3vw,11px); color:#777; }
+
+  /* Popup (centered) */
+  .popup {
+    position: fixed;
+    left: 50%;
+    top: 50%;
+    transform: translate(-50%,-50%) scale(0.9);
+    min-width: 180px;
+    max-width: 90vw;
+    padding: 18px 22px;
+    background: #fff;
+    border-radius: 14px;
+    box-shadow: 0 24px 48px rgba(12,20,40,0.35);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+    pointer-events: none; /* don't block UI while appearing */
+    opacity: 0;
+    z-index: 9999;
+  }
+
+  .popup .pred-digit {
+    font-size: clamp(36px, 14vw, 64px);
+    font-weight: 900;
+    line-height: 1;
+  }
+  .popup .pred-dir {
+    font-weight: 800;
+    font-size: clamp(14px, 4vw, 16px);
+    color: #333;
+  }
+
+  /* pop animation */
+  @keyframes popIn {
+    0% { transform: translate(-50%,-50%) scale(.6); opacity: 0; }
+    60% { transform: translate(-50%,-50%) scale(1.06); opacity: 1; }
+    100% { transform: translate(-50%,-50%) scale(1); opacity: 1; }
+  }
+  @keyframes popOut {
+    0% { transform: translate(-50%,-50%) scale(1); opacity: 1; }
+    100% { transform: translate(-50%,-50%) scale(.85); opacity: 0; }
+  }
+
+  .popup.show {
+    animation: popIn 420ms cubic-bezier(.2,.9,.3,1) both;
+    pointer-events: auto;
+  }
+  .popup.hiding {
+    animation: popOut 280ms cubic-bezier(.4,.0,.22,1) both;
+    pointer-events: none;
+  }
+
+  /* color accents */
+  .popup .pred-digit.up { color: #2b8bf2; }
+  .popup .pred-digit.down { color: #e74c3c; }
+  .popup .pred-sub { color: #666; font-size: 13px; }
+
+  /* small screen tweaks */
+  @media (max-width:420px){
+    .chart { height: 56vh; padding: 6px 10px; }
+    .popup { padding: 14px 16px; border-radius: 12px; }
+  }
+</style>
+</head>
+<body>
+  <h1>Mzplay Digits Predictor</h1>
+  <p class="sub">Click digits from the <strong>bottom row up</strong> (bottom = oldest, top = newest). Fill all <b>10</b> rows, then press <b>Analyze → Predict</b>.</p>
+
+  <div class="wrap">
+    <div class="left">
+      <div id="chart" class="chart" aria-label="digit chart">
+        <svg class="lines" id="lines" preserveAspectRatio="none"></svg>
+      </div>
+      <div class="controls">
+        <button class="primary" id="analyzeBtn">Analyze → Predict</button>
+        <button class="secondary" id="resetBtn">Reset</button>
+      </div>
+    </div>
+
+    <div class="right" aria-live="polite">
+      <!-- Removed the large 'Predicted next digit' table/label.
+           Keep a tiny hint and footer only. -->
+      <div class="muted">Prediction appears as a pop-up when you press Analyze → Predict.</div>
+      <footer>Demo — not financial advice.</footer>
+    </div>
+  </div>
+
+  <!-- Popup element (hidden by default) -->
+  <div id="popup" class="popup" role="status" aria-live="polite" aria-atomic="true" hidden>
+    <div id="popupDigit" class="pred-digit">—</div>
+    <div id="popupDir" class="pred-dir pred-sub"></div>
+  </div>
+
+<script>
+/* unchanged core logic, with popup management added */
+const ROWS = 10;
+const chart = document.getElementById('chart');
+const svg = document.getElementById('lines');
+const analyzeBtn = document.getElementById('analyzeBtn');
+const resetBtn = document.getElementById('resetBtn');
+const popup = document.getElementById('popup');
+const popupDigit = document.getElementById('popupDigit');
+const popupDir = document.getElementById('popupDir');
+
+const rows = [];
+const selected = new Array(ROWS).fill(null);
+let popupTimeout = null;
+
+function getColorClass(d){
+  if([1,3,7,9].includes(d)) return 'green';
+  if([2,4,6,8].includes(d)) return 'red';
+  if(d===0) return 'gradient-redviolet';
+  if(d===5) return 'gradient-greenviolet';
+  return 'red';
+}
+
+/* build chart rows and digits */
+for(let r=0;r<ROWS;r++){
+  const row=document.createElement('div');
+  row.className='row';
+  for(let d=0;d<10;d++){
+    const el=document.createElement('div');
+    el.className='digit';
+    el.textContent=d;
+    el.dataset.row=r;
+    el.dataset.digit=d;
+    el.dataset.color=getColorClass(d);
+    el.addEventListener('click',()=>onPick(r,d,el));
+    row.appendChild(el);
+  }
+  chart.appendChild(row);
+  rows.push(row);
+}
+
+/* compute center relative to chart local coordinates */
+function center(el){
+  const chartRect = chart.getBoundingClientRect();
+  const r = el.getBoundingClientRect();
+  const x = (r.left + r.right) / 2 - chartRect.left;
+  const y = (r.top + r.bottom) / 2 - chartRect.top;
+  return {x, y};
+}
+
+/* redraw polyline strictly inside chart size */
+function redrawLines(){
+  while(svg.firstChild) svg.removeChild(svg.firstChild);
+  const pts=[];
+  for(let r=0;r<ROWS;r++){
+    const v=selected[r];
+    if(v!==null){
+      const node=rows[r].querySelector(`.digit[data-digit="${v}"]`);
+      if(node) pts.push(center(node));
+    }
+  }
+  if(pts.length < 2) return;
+
+  const w = chart.clientWidth;
+  const h = chart.clientHeight;
+  svg.setAttribute('width', w);
+  svg.setAttribute('height', h);
+  svg.setAttribute('viewBox', `0 0 ${w} ${h}`);
+
+  const ns = 'http://www.w3.org/2000/svg';
+  const poly = document.createElementNS(ns, 'polyline');
+  poly.setAttribute('points', pts.map(p => `${p.x},${p.y}`).join(' '));
+  poly.setAttribute('fill', 'none');
+  poly.setAttribute('stroke', '#e74c3c');
+  poly.setAttribute('stroke-width', '2.5');
+  poly.setAttribute('stroke-linecap', 'round');
+  poly.setAttribute('stroke-linejoin', 'round');
+  svg.appendChild(poly);
+}
+
+/* selection handling */
+function onPick(rowIndex,digit,el){
+  rows[rowIndex].querySelectorAll('.digit').forEach(d=>{
+    d.classList.remove('active','green','red','gradient-redviolet','gradient-greenviolet');
+  });
+  el.classList.add('active',el.dataset.color);
+  selected[rowIndex] = digit;
+  redrawLines();
+}
+
+/* collect series bottom->top */
+function collectSeries(){
+  const series=[];
+  for(let i=ROWS-1;i>=0;i--){
+    const v = selected[i];
+    if(v === null) return null;
+    series.push(v);
+  }
+  return series;
+}
+
+/* detection / prediction functions (unchanged) */
+function findSwings(series){
+  const highs=[],lows=[];
+  for(let i=1;i<series.length-1;i++){
+    if(series[i]>series[i-1]&&series[i]>series[i+1])highs.push({i,val:series[i]});
+    if(series[i]<series[i-1]&&series[i]<series[i+1])lows.push({i,val:series[i]});
+  }
+  return{highs,lows};
+}
+function detectStructure(series){
+  const {highs,lows}=findSwings(series);
+  let s={trend:0};
+  if(highs.length>=2&&lows.length>=2){
+    const h1=highs[highs.length-2].val,h2=highs[highs.length-1].val,l1=lows[lows.length-2].val,l2=lows[lows.length-1].val;
+    if(h2>h1&&l2>l1)s.trend=1;
+    else if(h2<h1&&l2<l1)s.trend=-1;
+  }else{
+    const n=series.length;
+    if(n>=3){
+      const [a,b,c]=series.slice(-3);
+      if(b>a&&c>b)s.trend=1;
+      if(b<a&&c<b)s.trend=-1;
+    }
+  }
+  return s;
+}
+function detectBOS(series){
+  const n=series.length; if(n<3)return 0;
+  const prevHigh=Math.max(...series.slice(0,n-1)),prevLow=Math.min(...series.slice(0,n-1));
+  const last=series[n-1],prev=series[n-2];
+  if(last>prevHigh&&last>prev)return 1;
+  if(last<prevLow&&last<prev)return -1;
+  return 0;
+}
+function detectChoCH(series){
+  const s=detectStructure(series),b=detectBOS(series);
+  if(s.trend>0&&b===-1)return -1;
+  if(s.trend<0&&b===1)return 1;
+  return 0;
+}
+function detectFVG(series){
+  for(let i=0;i<series.length-1;i++){
+    const a=series[i],b=series[i+1];
+    if(Math.abs(b-a)>=2)return b>a?1:-1;
+  }
+  return 0;
+}
+function detectOB(series){
+  for(let i=series.length-2;i>=1;i--){
+    const p=series[i-1],c=series[i],n=series[i+1];
+    if(c<p&&c<n)return 1;
+    if(c>p&&c>n)return -1;
+  }
+  return 0;
+}
+function computeMzplayBias(series){
+  const s=detectStructure(series),bos=detectBOS(series),choch=detectChoCH(series),fvg=detectFVG(series),ob=detectOB(series);
+  let score=0;
+  score+=s.trend*0.5;
+  score+=bos*0.35;
+  score+=choch*-0.6;
+  score+=fvg*0.25;
+  score+=ob*0.2;
+  if(Math.abs(score)<1e-6)score=0;
+  return score;
+}
+function analyzeMzplay(series){
+  const n=series.length;
+  if(n<3)return{pred:null,dir:0};
+  const bias=computeMzplayBias(series);
+  if(bias===0)return{pred:null,dir:0};
+  const dir=bias>0?1:-1;
+  let pred=series[n-1];
+  if(dir===1)pred=Math.min(9,pred+3);else pred=Math.max(0,pred-3);
+  return{pred,dir};
+}
+
+/* Popup management */
+function showPopup(pred, dir){
+  // reset classes
+  popup.classList.remove('hiding');
+  popup.classList.add('show');
+  popup.hidden = false;
+  popupDigit.textContent = pred;
+  popupDigit.className = 'pred-digit ' + (dir === 1 ? 'up' : 'down');
+  popupDir.textContent = dir === 1 ? '▲ Predicted UP (newest +3)' : '▼ Predicted DOWN (newest −3)';
+
+  // clear existing timeout
+  if(popupTimeout) clearTimeout(popupTimeout);
+  // auto-hide after 3.5s
+  popupTimeout = setTimeout(() => hidePopup(), 3500);
+}
+
+function hidePopup(){
+  if(!popup || popup.hidden) return;
+  popup.classList.remove('show');
+  popup.classList.add('hiding');
+  // after animation ends, hide element
+  popup.addEventListener('animationend', function onEnd(){
+    popup.hidden = true;
+    popup.classList.remove('hiding');
+    popup.removeEventListener('animationend', onEnd);
+  });
+  if(popupTimeout){ clearTimeout(popupTimeout); popupTimeout = null; }
+}
+
+/* buttons */
+analyzeBtn.onclick = () => {
+  const s = collectSeries();
+  if(!s){
+    // show a small quick popup telling user to fill
+    popupDigit.textContent = '—';
+    popupDigit.className = 'pred-digit';
+    popupDir.textContent = 'Please fill all 10 digits first.';
+    popup.classList.remove('hiding');
+    popup.classList.add('show');
+    popup.hidden = false;
+    if(popupTimeout) clearTimeout(popupTimeout);
+    popupTimeout = setTimeout(() => hidePopup(), 2500);
+    return;
+  }
+  const r = analyzeMzplay(s);
+  if(r.dir === 0){
+    popupDigit.textContent = '—';
+    popupDigit.className = 'pred-digit';
+    popupDir.textContent = '⚠️ Market structure unclear — prediction skipped.';
+    popup.classList.remove('hiding');
+    popup.classList.add('show');
+    popup.hidden = false;
+    if(popupTimeout) clearTimeout(popupTimeout);
+    popupTimeout = setTimeout(() => hidePopup(), 3000);
+    return;
+  }
+
+  showPopup(r.pred, r.dir);
+};
+
+resetBtn.onclick = () => {
+  for(let r=0;r<ROWS;r++){
+    selected[r]=null;
+    rows[r].querySelectorAll('.digit').forEach(d=>d.classList.remove('active','green','red','gradient-redviolet','gradient-greenviolet'));
+  }
+  while(svg.firstChild) svg.removeChild(svg.firstChild);
+  hidePopup();
+};
+
+/* redraw lines on resize so popup/positions don't affect coordinates */
+window.addEventListener('resize', redrawLines);
+</script>
+</body>
+</html>
